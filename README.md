@@ -19,7 +19,7 @@ docker run --rm --gpus all unet-bench
 ## Запуск без Docker
 
 ```bash
-pip install torch torchvision segmentation-models-pytorch
+pip install -r requirements.txt
 python run_bench.py
 ```
 

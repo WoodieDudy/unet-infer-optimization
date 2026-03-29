@@ -16,7 +16,7 @@ dummy = torch.randn(INPUT_SHAPE, device=DEVICE, dtype=DTYPE)
 
 def bench(fn, label: str, description: str):
     # warmup
-    with torch.no_grad():
+    with torch.inference_mode():
         for _ in range(20):
             fn(dummy)
     torch.cuda.synchronize()
@@ -34,14 +34,14 @@ def bench(fn, label: str, description: str):
 results = []
 
 # fp16 baseline
-with torch.no_grad():
+with torch.inference_mode():
     r = bench(model, "UNet inference", "fp16 baseline")
     results.append(r)
     print(r)
 
 # torch.compile
 compiled = torch.compile(model)
-with torch.no_grad():
+with torch.inference_mode():
     r = bench(compiled, "UNet inference", "torch.compile")
     results.append(r)
     print(r)
