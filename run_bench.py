@@ -81,19 +81,17 @@ def main():
     peak_mems = []
 
     # fp16 baseline
-    with torch.inference_mode():
-        r, mem = bench(model, dummy, warmup, min_run_time, "UNet inference", "fp16 baseline")
-        results.append(r)
-        peak_mems.append(mem)
-        print(r)
+    r, mem = bench(model, dummy, warmup, min_run_time, "UNet inference", "fp16 baseline")
+    results.append(r)
+    peak_mems.append(mem)
+    print(r)
 
     # torch.compile
     compiled = torch.compile(model)
-    with torch.inference_mode():
-        r, mem = bench(compiled, dummy, warmup, min_run_time, "UNet inference", "torch.compile")
-        results.append(r)
-        peak_mems.append(mem)
-        print(r)
+    r, mem = bench(compiled, dummy, warmup, min_run_time, "UNet inference", "torch.compile")
+    results.append(r)
+    peak_mems.append(mem)
+    print(r)
 
     compare = torch.utils.benchmark.Compare(results)
     print()
