@@ -67,7 +67,7 @@ def to_indices(x):
     return mask - 1
 
 
-def get_loaders(input_size, batch_size):
+def get_loaders(input_size, batch_size, num_workers):
     transform = T.Compose([
         T.Resize((input_size, input_size)),
         T.ToTensor(),
@@ -95,8 +95,14 @@ def get_loaders(input_size, batch_size):
         target_transform=target_transform
     )
 
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=False)
+    train_loader = torch.utils.data.DataLoader(
+        train_set, shuffle=True, batch_size=batch_size,
+        num_workers=num_workers, pin_memory=True
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_set, shuffle=False, batch_size=batch_size,
+        num_workers=num_workers, pin_memory=True
+    )
     return train_loader, test_loader
 
 
@@ -124,7 +130,7 @@ def main():
     input_shape = (config["data"]["batch_size"], 3, config["data"]["input_size"], config["data"]["input_size"])
     print_env_info(input_shape)
 
-    train_loader, test_loader = get_loaders(config["data"]["input_size"], config["data"]["batch_size"])
+    train_loader, test_loader = get_loaders(**config["data"])
 
     model = smp.Unet(**config["model"])
     model = model.to(DEVICE)
@@ -136,6 +142,7 @@ def main():
         callbacks=[checkpoint_callback],
         **config["trainer"]
     )
+    trainer.validate(model, dataloaders=test_loader)
     trainer.fit(model, train_loader, val_dataloaders=test_loader)
 
 
