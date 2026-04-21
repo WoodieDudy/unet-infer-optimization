@@ -7,6 +7,7 @@ import torch
 import lightning as L
 import segmentation_models_pytorch as smp
 import onnxruntime as ort
+import tensorrt
 import numpy as np
 import time
 from train import SegmentationModule, get_loaders
@@ -130,5 +131,21 @@ def main():
 
     session = ort.InferenceSession(str(onnx_path), providers=providers)
 
+
+def print_env_info():
+    print("=" * 60)
+    print("Environment")
+    print("=" * 60)
+    print(f"  PyTorch        : {torch.__version__}")
+    print(f"  CUDA (runtime) : {torch.version.cuda}")
+    print(f"  cuDNN          : {torch.backends.cudnn.version()}")
+    print(f"  GPU            : {torch.cuda.get_device_name(0)}")
+    print(f"  ort            : {ort.__version__}")
+    print(f"  tensorrt       : {tensorrt.__version__}")
+    print(f'LD_LIBRARY_PATH {os.environ.get("LD_LIBRARY_PATH", "LD_LIBRARY_PATH пустой")}')
+    print("=" * 60)
+    print()
+
 if __name__ == "__main__":
+    print_env_info()
     main()
