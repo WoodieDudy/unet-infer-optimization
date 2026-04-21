@@ -112,25 +112,41 @@ def main():
     data_reader.rewind()
     calibrator.collect_data(data_reader)
     calibration_table = calibrator.compute_data()
+    # write_calibration_table(calibration_table, config["exp_dir"])
+    with open(calibration_path, 'w') as f:
+        for tensor_name, data in calibration_table.data.items():
+            # data.scale — это обычно то, что нужно TRT
+            # Но в разных версиях ORT объект может отличаться. 
+            # Попробуем достать значение шкалы:
+            scale = data.scale if hasattr(data, 'scale') else data[0]
+            f.write(f"{tensor_name}: {scale}\n")
 
-    write_calibration_table(calibration_table, config["exp_dir"])
-
+    print(f"Таблица калибровки сохранена в {calibration_path}")
     print("Таблица калибровки 'calibration.cache' создана!")
 
-    # 3. Настройка сессии с использованием таблицы
+    # 2. Настройка провайдеров
     providers = [
         ('TensorrtExecutionProvider', {
             'trt_fp16_enable': True,
             'trt_int8_enable': True,
-            'trt_int8_calibration_table_name': str(calibration_path),
+            'trt_int8_calibration_table_name': str(calibration_path), # Файл создастся сам
             'trt_engine_cache_enable': True,
             'trt_engine_cache_path': str(cache_dir)
         }),
         'CUDAExecutionProvider'
     ]
 
+    print("Создание сессии и запуск калибровки TensorRT...")
     session = ort.InferenceSession(str(onnx_path), providers=providers)
-
+    
+    # 3. Чтобы калибровка реально произошла, нужно прогнать данные
+    _, test_loader = get_loaders(**config["data"])
+    for i, batch in enumerate(test_loader):
+        if i > 100: break # Хватит 100 батчей для калибровки
+        input_data = batch[0].numpy()
+        session.run(None, {'input': input_data})
+    
+    print(f"Калибровка завершена. Файл сохранен в: {calibration_path}")
 
 def print_env_info():
     print("=" * 60)
