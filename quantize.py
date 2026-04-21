@@ -115,86 +115,32 @@ def main():
     )
     print("Модель сконвертирована в ONNX!")
 
-    # 2. Создание загрузчика и запуск калибровки
-    _, test_loader = get_loaders(**config["data"])
-    data_reader = UNetDataReader(test_loader, input_name="input", limit=2)
-
-    # Генерируем таблицу калибровки (MinMax или Entropy)
-    # calibrator = calibrate.MinMaxCalibrater(
-    #     model_path=onnx_path,
-    #     op_types_to_calibrate=None,
-    #     augmented_model_path=str(onnx_path.parent / "augmented_model_path.onnx"),
-    #     max_intermediate_outputs=10
-    # )
-    # calibrator.augment_graph()
-    # calibrator.set_execution_providers(["CUDAExecutionProvider"])
-    # # calibrator.create_inference_session()
-    # data_reader.rewind()
-    # calibrator.collect_data(data_reader)
-    # calibration_table = calibrator.calibrate_tensors_range
-    # # calibration_table = calibrator.compute_data()
-    # # write_calibration_table(calibration_table, config["exp_dir"])
-
-    data_reader.rewind()
-    quantize_static(
-        model_input=onnx_path,
-        model_output=str(onnx_path.parent / "model_int8_qdq.onnx"),
-        calibration_data_reader=data_reader,
-        quant_format=QuantFormat.QDQ,        # Формат для TensorRT
-        activation_type=QuantType.QInt8,
-        weight_type=QuantType.QInt8,
-        per_channel=True,                    # Улучшает точность весов
-        calibrate_method=CalibrationMethod.MinMax, # Самый легкий метод по памяти
-        extra_options={
-            'ExecutionProviders': ['CUDAExecutionProvider'],
-            'SkipInference': True,  # ОЧЕНЬ ВАЖНО: пропускаем встроенную проверку форм
-            'ActivationSymmetry': True, # Сделать активации симметричными (ZP будет 0)
-            'WeightSymmetry': True,     # Сделать веса симметричными (ZP будет 0)
-            'batch_size': 1
-        }
-    )
-
-    # print(f"Таблица калибровки сохранена в {calibration_path}")
-    print("Таблица калибровки 'calibration.cache' создана!")
-
-    # # 2. Настройка провайдеров
-    # providers = [
-    #     ('TensorrtExecutionProvider', {
-    #         'trt_fp16_enable': True,
-    #         'trt_int8_enable': True,
-    #         'trt_int8_calibration_table_name': str(calibration_path), # Файл создастся сам
-    #         'trt_engine_cache_enable': True,
-    #         'trt_engine_cache_path': str(cache_dir),
-    #         # 'trt_force_int8_calibration': True  # Заставляем TRT калиброваться
-    #         'trt_int8_use_native_calibration_table': False,
-    #     }),
-    #     'CUDAExecutionProvider'
-    # ]
-
-    # print("Создание сессии и запуск калибровки TensorRT...")
-    # session = ort.InferenceSession(str(onnx_path), providers=providers)
+    # if not os.path.exists(calibration_table):
+    #     open(calibration_table, 'a').close()
 
     providers = [
         ('TensorrtExecutionProvider', {
             'trt_fp16_enable': True,
-            'trt_int8_enable': True, # Просто включаем поддержку
+            'trt_int8_enable': True,
+            # 'trt_int8_calibration_table_name': calibration_path,
             'trt_engine_cache_enable': True,
-            'trt_engine_cache_path': str(cache_dir)
+            'trt_engine_cache_path': str(cache_dir),
+            'trt_int8_use_native_calibration_table': False, 
         }),
         'CUDAExecutionProvider'
     ]
 
-    # Эта сессия не должна падать в Segfault, так как калибровка уже "внутри" модели
-    session = ort.InferenceSession(str(onnx_path.parent / "model_int8_qdq.onnx"), providers=providers)
+    print("Инициализация сессии TensorRT (может занять время)...")
+    session = ort.InferenceSession(str(onnx_path), providers=providers)
 
     print("Запуск сессии")
     
     # 3. Чтобы калибровка реально произошла, нужно прогнать данные
-    # _, test_loader = get_loaders(**config["data"])
-    # for i, batch in enumerate(test_loader):
-    #     if i > 2: break # Хватит 100 батчей для калибровки
-    #     input_data = batch[0].numpy()
-    #     session.run(None, {'input': input_data})
+    _, test_loader = get_loaders(**config["data"])
+    for i, batch in enumerate(test_loader):
+        if i > 2: break # Хватит 100 батчей для калибровки
+        input_data = batch[0].numpy()
+        session.run(None, {'input': input_data})
     
     print("Вроде работает")
     
