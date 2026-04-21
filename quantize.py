@@ -11,7 +11,7 @@ import numpy as np
 import time
 from train import SegmentationModule, get_loaders
 from pathlib import Path
-from onnxruntime.quantization import CalibrationDataReader, create_calibrator, CalibrationMethod, write_calibration_table
+from onnxruntime.quantization import calibrate, CalibrationDataReader, write_calibration_table
 
 
 class UNetDataReader(CalibrationDataReader):
@@ -104,7 +104,6 @@ def main():
     data_reader = UNetDataReader(test_loader, 'input')
 
     # Генерируем таблицу калибровки (MinMax или Entropy)
-    from onnxruntime.quantization import calibrate
     calibrator = calibrate.MinMaxCalibrater(onnx_path, data_reader, str(onnx_path.parent / "augmented_model_path.onnx"))
     calibrator.augment_graph()
     calibrator.set_execution_providers(["CUDAExecutionProvider"])
@@ -122,14 +121,14 @@ def main():
         ('TensorrtExecutionProvider', {
             'trt_fp16_enable': True,
             'trt_int8_enable': True,
-            'trt_int8_calibration_table_name': 'calibration.cache',
+            'trt_int8_calibration_table_name': str(calibration_path),
             'trt_engine_cache_enable': True,
             'trt_engine_cache_path': str(cache_dir)
         }),
         'CUDAExecutionProvider'
     ]
 
-    session = ort.InferenceSession("unet_model.onnx", providers=providers)
+    session = ort.InferenceSession(str(onnx_path), providers=providers)
 
 if __name__ == "__main__":
     main()

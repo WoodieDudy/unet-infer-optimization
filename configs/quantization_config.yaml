@@ -1,5 +1,5 @@
 exp_dir: "/root/efficient_dl/unet-infer-optimization/experiments/quantization_2026_04_20"
-model_path: "/root/efficient_dl/unet-infer-optimization/experiments/quantization_2026_04_20/lightning_logs/version_2/checkpoints/quantization_2026_04_20.ckpt"
+model_path: "/root/efficient_dl/unet-infer-optimization/experiments/quantization_2026_04_20/lightning_logs/version_2/checkpoints/trained_baseline.ckpt"
 model:
   classes: 3
   in_channels: 3
