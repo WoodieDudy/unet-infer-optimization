@@ -10,6 +10,12 @@ from train import SegmentationModule, get_loaders
 from pathlib import Path
 
 
+import os
+os.environ["TORCH_EXPORT_DECOMPOSE_NON_STRICT"] = "1"
+# Also try:
+os.environ["TORCHDYNAMO_DISABLE"] = "1" 
+
+
 def print_optimization_dependencies():
     import torch
     import modelopt
@@ -80,7 +86,7 @@ def main(config):
         do_constant_folding=True,
         input_names=['input'],
         output_names=['output'],
-        dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}}
+        # dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}}
     )
 
 
