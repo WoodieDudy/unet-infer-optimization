@@ -1,26 +1,29 @@
+# Стандартные библиотеки
 import argparse
-import yaml
 import os
-os.environ["LD_LIBRARY_PATH"] += ":/root/efficient_dl/efficient_dl_env/lib/python3.11/site-packages/tensorrt_libs"
-import json
-import joblib
-import torch
-import lightning as L
-import segmentation_models_pytorch as smp
-import onnxruntime as ort
-import tensorrt
-import numpy as np
-import time
-from train import SegmentationModule, get_loaders
 from pathlib import Path
+
+# Сторонние библиотеки
+import onnxruntime as ort
+import segmentation_models_pytorch as smp
+import tensorrt
+import torch
+import yaml
 from onnxruntime.quantization import (
-    CalibrationDataReader, write_calibration_table,
-    calibrate, quantize_static, QuantType, QuantFormat, CalibrationMethod
+    CalibrationDataReader,
+    create_calibrator,
+    write_calibration_table,
 )
-from onnxruntime.quantization import create_calibrator, write_calibration_table, CalibrationDataReader
+
+# Локальные модули
+from train import SegmentationModule, get_loaders
+
+
+# os.environ["LD_LIBRARY_PATH"] += ":/root/efficient_dl/efficient_dl_env/lib/python3.11/site-packages/tensorrt_libs"
 
 
 class UNetDataReader(CalibrationDataReader):
+    """Для загрузки данных при калибровке"""
     def __init__(self, dataloader, input_name, limit=None):
         self.dataloader = dataloader
         self.input_name = input_name
@@ -30,7 +33,7 @@ class UNetDataReader(CalibrationDataReader):
 
     def get_next(self):
         # Если лимит задан и мы его достигли — останавливаемся
-        if self.limit is not None and self.counter >= self.limit:
+        if self.limit is not None and self.counter > self.limit:
             return None
 
         batch = next(self.dataset_iter, None)
@@ -54,6 +57,7 @@ class UNetDataReader(CalibrationDataReader):
 
 
 class TRTModelWrapper:
+    """Создает сессию и прогоняет input"""
     def __init__(self, onnx_path, calibration_path, cache_dir):
         self.onnx_path = onnx_path
         self.calibration_path = calibration_path
@@ -72,8 +76,7 @@ class TRTModelWrapper:
                     'trt_int8_calibration_table_name': self.calibration_path,
                     'trt_engine_cache_enable': True,
                     'trt_engine_cache_path': self.cache_dir
-                }),
-                'CUDAExecutionProvider'
+                })
             ]
             self.session = ort.InferenceSession(self.onnx_path, providers=providers)
 
@@ -84,14 +87,7 @@ class TRTModelWrapper:
         return self
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="config.yaml")
-    args = parser.parse_args()
-
-    with open(args.config, "r") as f:
-        config = yaml.safe_load(f)
-    
+def main(config):
     model_module = SegmentationModule.load_from_checkpoint(
         checkpoint_path=config["model_path"],
         model=smp.Unet(**config["model"])
@@ -101,26 +97,10 @@ def main():
 
     exp_dir = Path(config["exp_dir"])
     onnx_path = exp_dir / "unet_model.onnx"
-    # Для TensorRT важно расширение .flatbuffers или .cache
     calibration_table = str(exp_dir / "calibration.flatbuffers") 
     cache_dir = str(exp_dir / "cache_dir")
     os.makedirs(cache_dir, exist_ok=True)
 
-    # torch.onnx.export(
-    #     model_module.model,
-    #     dummy_input, 
-    #     str(onnx_path), 
-    #     export_params=True, 
-    #     opset_version=17,
-    #     do_constant_folding=True, 
-    #     input_names=['input'], 
-    #     output_names=['output'],
-    #     dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}},
-    #     # Это заставит использовать классический скриптовый экспортер
-    #     operator_export_type=torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH 
-    # )
-    # torch.onnx.export(model_module.model, dummy_input, str(onnx_path), verbose=False, input_names=['input'], output_names=['output'], dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}})
-    # 1. Экспорт в стандартный ONNX (без квантования внутри)
     model_module.eval().cpu() # Экспортировать лучше на CPU для стабильности
     dummy_input = torch.randn(1, 3, 256, 256)
     torch.onnx.export(
@@ -130,30 +110,24 @@ def main():
         input_names=['input'], 
         output_names=['output'], 
         dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}},
-        opset_version=13, # Стабильная версия для TRT
+        opset_version=18,
         do_constant_folding=True
     )
     print("Модель сконвертирована в ONNX!")
 
     
     print("Начало калибровки...")
-    _, test_loader = get_loaders(input_size=config["data"]["input_size"], batch_size=1, num_workers=config["data"]["num_workers"])
-    data_reader = UNetDataReader(test_loader, input_name='input')
+    print("batch_size=1 т.к. у меня только 5Gb")
+    _, test_loader = get_loaders(**config["data"])
+    data_reader = UNetDataReader(test_loader, input_name='input', limit=config["calibration"]["data_reader_limit"])
     
-    # Создаем калибратор. Он создаст "augmented_model.onnx" во временной папке
     augmented_model_path = str(exp_dir / "augmented_model.onnx")
     calibrator = create_calibrator(str(onnx_path), [], augmented_model_path=augmented_model_path, providers=["CUDAExecutionProvider"])
-    # calibrator.set_execution_providers(["CUDAExecutionProvider"]) 
 
-    for i in range(2):
-        data = data_reader.get_next()
-        if data is None: break
-        calibrator.collect_data(data_reader) # Внутри он вызовет get_next
-    
-    write_calibration_table(calibrator.compute_range(), calibration_table)
-    print(f"Таблица калибровки сохранена: {calibration_table}")
+    calibrator.collect_data(data_reader)
+    write_calibration_table(calibrator.calibrate_tensors_range, exp_dir)
+    print(f"Таблица калибровки сохранена: {exp_dir / 'calibration.flatbuffers'}")
 
-    # 3. ЗАПУСК ИНФЕРЕНСА С ТАБЛИЦЕЙ
     print("Запуск TensorRT сессии...")
     providers = [
         ('TensorrtExecutionProvider', {
@@ -163,16 +137,11 @@ def main():
             'trt_engine_cache_enable': True,
             'trt_engine_cache_path': cache_dir,
         }),
-        'CUDAExecutionProvider'
     ]
 
-    # Используем ОРИГИНАЛЬНЫЙ onnx_path, а не квантованный! 
-    # TRT сам подтянет таблицу калибровки.
     session = ort.InferenceSession(str(onnx_path), providers=providers)
-
     print("Запуск сессии")
     
-    # Тестовый прогон
     test_batch = next(iter(test_loader))[0].numpy()
     outputs = session.run(None, {'input': test_batch})
     print("Успех! Сессия создана, тензор получен.")
@@ -192,6 +161,41 @@ def print_env_info():
     print("=" * 60)
     print()
 
+def test(onnx_path, calibration_table_path, cache_dir):
+    trt_model = TRTModelWrapper(
+        onnx_path=onnx_path, 
+        calibration_path=calibration_table_path, 
+        cache_dir=cache_dir
+    )
+
+    _, test_loader = get_loaders(input_size=config["data"]["input_size"], batch_size=1, num_workers=config["data"]["num_workers"])
+    batch = next(iter(test_loader))
+    images = batch[0]
+
+    with torch.no_grad():
+        output = trt_model(images)
+
+    print(f"Входной тензор: {images.shape}")
+    print(f"Выходной тензор: {output.shape}")
+    print("Запуск прошел успешно!")
+
+
 if __name__ == "__main__":
     print_env_info()
-    main()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="config.yaml")
+    args = parser.parse_args()
+
+    with open(args.config, "r") as f:
+        config = yaml.safe_load(f)
+    
+    main(config)
+
+    exp_dir = Path(config["exp_dir"])
+    onnx_path = exp_dir / "unet_model.onnx"
+    calibration_table = str(exp_dir / "calibration.flatbuffers") 
+    cache_dir = str(exp_dir / "cache_dir")
+
+    test(onnx_path, calibration_table, cache_dir)
+
