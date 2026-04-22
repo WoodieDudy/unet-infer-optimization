@@ -20,6 +20,10 @@ from train import SegmentationModule, get_loaders
 
 
 # os.environ["LD_LIBRARY_PATH"] += ":/root/efficient_dl/efficient_dl_env/lib/python3.11/site-packages/tensorrt_libs"
+# критично на низких версиях
+# export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/efficient_dl/efficient_dl_env/lib/python3.11/site-packages/nvidia/cudnn/lib
+# export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/efficient_dl/efficient_dl_env/lib/python3.11/site-packages/tensorrt_libs
+
 
 
 class UNetDataReader(CalibrationDataReader):
@@ -117,16 +121,15 @@ def main(config):
 
     
     print("Начало калибровки...")
-    print("batch_size=1 т.к. у меня только 5Gb")
     _, test_loader = get_loaders(**config["data"])
     data_reader = UNetDataReader(test_loader, input_name='input', limit=config["calibration"]["data_reader_limit"])
     
     augmented_model_path = str(exp_dir / "augmented_model.onnx")
-    calibrator = create_calibrator(str(onnx_path), [], augmented_model_path=augmented_model_path, providers=["CUDAExecutionProvider"])
+    calibrator = create_calibrator(str(onnx_path), [], augmented_model_path=augmented_model_path)
+    calibrator.set_execution_providers(["CUDAExecutionProvider"])
 
     calibrator.collect_data(data_reader)
     write_calibration_table(calibrator.calibrate_tensors_range, exp_dir)
-    print(f"Таблица калибровки сохранена: {exp_dir / 'calibration.flatbuffers'}")
 
     print("Запуск TensorRT сессии...")
     providers = [
@@ -136,10 +139,20 @@ def main(config):
             'trt_int8_calibration_table_name': calibration_table,
             'trt_engine_cache_enable': True,
             'trt_engine_cache_path': cache_dir,
+            'trt_max_workspace_size': 2 * 1024 * 1024 * 1024,
+            'trt_engine_cache_enable': False,
+            'trt_profile_min_shapes': 'input:1x3x256x256',
+            'trt_profile_max_shapes': 'input:1x3x256x256', # или ваш макс батч
+            'trt_profile_opt_shapes': 'input:1x3x256x256',
         }),
     ]
 
-    session = ort.InferenceSession(str(onnx_path), providers=providers)
+    sess_options = ort.SessionOptions()
+    sess_options.log_severity_level = 0
+    sess_options.intra_op_num_threads = 1
+    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+
+    session = ort.InferenceSession(str(onnx_path), sess_options=sess_options, providers=providers)
     print("Запуск сессии")
     
     test_batch = next(iter(test_loader))[0].numpy()
@@ -168,7 +181,7 @@ def test(onnx_path, calibration_table_path, cache_dir):
         cache_dir=cache_dir
     )
 
-    _, test_loader = get_loaders(input_size=config["data"]["input_size"], batch_size=1, num_workers=config["data"]["num_workers"])
+    _, test_loader = get_loaders(**config["data"])
     batch = next(iter(test_loader))
     images = batch[0]
 
