@@ -19,10 +19,11 @@ from onnxruntime.quantization import (
 from train import SegmentationModule, get_loaders
 
 
-# os.environ["LD_LIBRARY_PATH"] += ":/root/efficient_dl/efficient_dl_env/lib/python3.11/site-packages/tensorrt_libs"
+os.environ["LD_LIBRARY_PATH"] += ":/root/efficient_dl/efficient_dl_env/lib/python3.11/site-packages/tensorrt_libs"
 # критично на низких версиях
 # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/efficient_dl/efficient_dl_env/lib/python3.11/site-packages/nvidia/cudnn/lib
 # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/efficient_dl/efficient_dl_env/lib/python3.11/site-packages/tensorrt_libs
+
 
 
 
@@ -130,6 +131,7 @@ def main(config):
 
     calibrator.collect_data(data_reader)
     write_calibration_table(calibrator.calibrate_tensors_range, exp_dir)
+    print(f"Таблица калибровки сохранена: {exp_dir / 'calibration.flatbuffers'}")
 
     print("Запуск TensorRT сессии...")
     providers = [
@@ -140,19 +142,10 @@ def main(config):
             'trt_engine_cache_enable': True,
             'trt_engine_cache_path': cache_dir,
             'trt_max_workspace_size': 2 * 1024 * 1024 * 1024,
-            'trt_engine_cache_enable': False,
-            'trt_profile_min_shapes': 'input:1x3x256x256',
-            'trt_profile_max_shapes': 'input:1x3x256x256', # или ваш макс батч
-            'trt_profile_opt_shapes': 'input:1x3x256x256',
         }),
     ]
 
-    sess_options = ort.SessionOptions()
-    sess_options.log_severity_level = 0
-    sess_options.intra_op_num_threads = 1
-    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
-
-    session = ort.InferenceSession(str(onnx_path), sess_options=sess_options, providers=providers)
+    session = ort.InferenceSession(str(onnx_path), providers=providers)
     print("Запуск сессии")
     
     test_batch = next(iter(test_loader))[0].numpy()
