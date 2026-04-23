@@ -1,15 +1,14 @@
-exp_dir: "/root/efficient_dl/unet-infer-optimization/experiments/quantization_2026_04_20"
-lr: 0.0001
+exp_dir: "experiments/train_sparse"
+lr: 0.00001
 trainer:
-  max_epochs: 10
-  accelerator: "auto"
+  max_epochs: 3
+  accelerator: "gpu"
   devices: 1
   precision: "16-mixed"
-  accelerator: "gpu"
   log_every_n_steps: 10
 
 model_checkpoint:
-  filename: "trained_baseline"
+  filename: "trained_sparse"
   save_top_k: 1
   monitor: "val_iou"
   mode: "max"
@@ -17,14 +16,10 @@ model_checkpoint:
 model:
   classes: 3
   in_channels: 3
-  encoder_weights: "imagenet"
+  encoder_weights: null
   encoder_name: "resnet34"
 
 data:
   batch_size: 32
   input_size: 256
   num_workers: 4
-
-bench:
-  warmup: 20
-  min_run_time: 3

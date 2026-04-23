@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-04-23T15:19:49.037012+00:00",
+  "env": {
+    "pytorch": "2.11.0+cu130",
+    "cuda": "13.0",
+    "cudnn": 91900,
+    "gpu": "NVIDIA A100-PCIE-40GB",
+    "input_shape": [
+      32,
+      3,
+      256,
+      256
+    ],
+    "dtype": "torch.float16"
+  },
+  "results": [
+    {
+      "pipeline": "fp16 baseline",
+      "latency_ms": 11.256772559136152,
+      "throughput_img_s": 2842.7331041727725,
+      "peak_gpu_mb": 1623.158203125,
+      "speedup": 1.0
+    },
+    {
+      "pipeline": "torch.compile",
+      "latency_ms": 9.890997782349586,
+      "throughput_img_s": 3235.265107136488,
+      "peak_gpu_mb": 1506.08349609375,
+      "speedup": 1.1380826087357718
+    },
+    {
+      "pipeline": "trt fp16 (polygraphy)",
+      "latency_ms": 5.099496245384216,
+      "throughput_img_s": 6275.129632454311,
+      "peak_gpu_mb": 108.44921875,
+      "speedup": 2.207428345363557
+    },
+    {
+      "pipeline": "trt int8 (polygraphy)",
+      "latency_ms": 2.9603142756968737,
+      "throughput_img_s": 10809.66310324164,
+      "peak_gpu_mb": 132.44921875,
+      "speedup": 3.802559968564908
+    },
+    {
+      "pipeline": "trt fp16 sparse 2:4",
+      "latency_ms": 4.515565745532513,
+      "throughput_img_s": 7086.598181337364,
+      "peak_gpu_mb": 156.44921875,
+      "speedup": 2.4928819982907062
+    },
+    {
+      "pipeline": "trt int8 sparse 2:4",
+      "latency_ms": 2.6955410558730364,
+      "throughput_img_s": 11871.4570977424,
+      "peak_gpu_mb": 180.44921875,
+      "speedup": 4.176071640463398
+    }
+  ]
+}

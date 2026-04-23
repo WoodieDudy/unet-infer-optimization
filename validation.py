@@ -7,7 +7,6 @@ import lightning as L
 import segmentation_models_pytorch as smp
 from train import SegmentationModule, get_loaders
 from pathlib import Path
-from quantization import TRTModelWrapper
 
 DEVICE = torch.device("cuda")
 
@@ -32,12 +31,9 @@ def run_evaluation():
             model = model.to(DEVICE, dtype=torch.float16)
             if model_config["compile"]:
                 model = torch.compile(model)
-        elif model_config["model_path"].endswith(".onnx"):
-            trt = TRTModelWrapper(
-                model_config["model_path"],
-                model_config["calibration_path"],
-                model_config["cache_dir"]
-            )
+        elif model_config["model_path"].endswith(".engine"):
+            from quantize import TRTModelWrapper
+            trt = TRTModelWrapper(model_config["model_path"])
             model = SegmentationModule(trt)
         else:
             raise NotImplementedError("Неизвестный формат")
