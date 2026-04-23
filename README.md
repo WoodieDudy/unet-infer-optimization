@@ -88,7 +88,7 @@ trtexec --onnx=experiments/trt_fp16/unet.onnx \
 
 ## 4. Сборка TRT engine (int8) с калибровкой на реальных данных
 
-`trtexec --int8` без указания калибровочного cache берёт **случайный шум** для статистик активаций — так делать нельзя. Сначала генерируем cache на реальных данных через `calibrate.py` (свой `IInt8EntropyCalibrator2` поверх Python TRT API), потом скармливаем cache в `trtexec`.
+`trtexec --int8` без указания калибровочного cache берёт **случайный шум** для статистик активаций — так делать нельзя. Сначала генерируем cache на реальных данных через `calibrate.py`, потом скармливаем cache в `trtexec`.
 
 ```bash
 # 1. Калибровка: 16 батчей × 32 картинки из test_loader → calib.cache
@@ -104,10 +104,6 @@ trtexec --onnx=experiments/trt_fp16/unet.onnx \
     --profilingVerbosity=detailed --skipInference
 ```
 
-[calibrate.py](calibrate.py) парсит ONNX через `trt.OnnxParser.parse_from_file`, создаёт билдер с флагом INT8 и собственным `IInt8EntropyCalibrator2`, который отдаёт батчи из `train.get_loaders`. По завершению `build_serialized_network` TRT вызывает `write_calibration_cache` → cache на диске. Сам собранный engine выбрасывается, нам нужен только cache.
-
-- `--fp16 --int8` вместе — TRT сам решает per-layer, где int8-tactic невыгоден (медленнее или сильно теряет точность), и оставляет такие слои в fp16. Без `--fp16` точность обычно заметно хуже.
-
 
 ## 5. Валидация
 
@@ -115,13 +111,16 @@ trtexec --onnx=experiments/trt_fp16/unet.onnx \
 python validation.py --config val_config_local.yaml
 ```
 
-[val_config_local.yaml](val_config_local.yaml) описывает все четыре модели:
-- `fp16 baseline` — Lightning-чекпоинт (`*.ckpt`)
-- `torch.compile` — тот же чекпоинт + `torch.compile`
-- `trt fp16 (polygraphy)` — TRT engine (`*.engine`), инференс через `polygraphy.TrtRunner` (см. `quantize.py:64` `TRTModelWrapper`)
-- `trt int8 (polygraphy)` — то же самое для int8 engine
+[val_config_local.yaml](val_config_local.yaml) описывает все четыре сэтапа.
 
 Метрики пишутся в `experiments/validation_local/validation_results.json`.
+
+| Method | val_iou |
+|---|---|
+| fp16 baseline | 0.87321 |
+| torch.compile | 0.87321 |
+| trt fp16 | 0.87319 |
+| trt int8 | 0.87298 |
 
 ## 6. Бенчмарк
 
@@ -134,6 +133,13 @@ python run_bench.py \
     --trt-engine "trt int8 (polygraphy)=experiments/trt_fp16/unet_int8.engine"
 ```
 
+| Method | Latency, ms | Throughput, img/s | Peak GPU, MB | Speedup |
+|---|---|---|---|---|---|
+| fp16 baseline | 11.25 | 2844.6 | 1623 | 1.00× |
+| torch.compile | 9.87 | 3241.2 | 1506 | 1.14× |
+| trt fp16 | 5.09 | 6283.3 | 108 | 2.21× |
+| trt int8 | 2.96 | 10799.4 | 132 | 3.80× |
+
 
 **Sanity-check — те же цифры через `trtexec --useCudaGraph`**:
 
@@ -143,7 +149,7 @@ trtexec --loadEngine=experiments/trt_fp16/unet_fp16.engine \
     --warmUp=1000 --iterations=500 --noDataTransfers
 ```
 
-В нашем случае `run_bench.py` (`5.08 ms` для fp16, `2.94 ms` для int8) совпал с `trtexec` (`4.97 ms` для fp16) с разницей <3% — это подтверждает, что обёртка действительно мерит чистую compute-latency.
+В нашем случае `run_bench.py` (`5.08 ms` для fp16, `2.94 ms` для int8) совпал с `trtexec --useCudaGraph` (`4.97 ms` для fp16, `2.84 ms` для int8) с разницей <3% — это подтверждает, что обёртка действительно мерит чистую compute-latency.
 
 ## 7. Sparsity 2:4 (NVIDIA Sparse Tensor Cores)
 
@@ -202,7 +208,7 @@ trtexec --onnx=experiments/trt_sparse/unet_sparse.onnx \
     --profilingVerbosity=detailed --skipInference
 ```
 
-Флаг `--sparsity=enable` (= `BuilderFlag.SPARSE_WEIGHTS` в TRT API) говорит TRT проверить, попадают ли веса в 2:4 паттерн, и **включить sparse MMA** там, где попадают.
+Флаг `--sparsity=enable` говорит TRT проверить, попадают ли веса в 2:4 паттерн, и **включить sparse MMA** там, где попадают.
 
 
 **5. Валидация и бенчмарк** — те же `validation.py` и `run_bench.py`, добавляются 2 строки:
@@ -214,7 +220,16 @@ python3 run_bench.py --batch-size 32 --input-size 256 \
     --trt-engine "trt int8 sparse 2:4=experiments/trt_sparse/unet_sparse_int8.engine"
 ```
 
-### Что получили
+
+| Method | val_iou | Latency, ms | Throughput, img/s | Peak GPU, MB | Speedup |
+|---|---|---|---|---|---|
+| fp16 baseline (ckpt + torch fp16) | 0.87321 | 11.25 | 2844.6 | 1623 | 1.00× |
+| torch.compile | 0.87321 | 9.87 | 3241.2 | 1506 | 1.14× |
+| trt fp16 (polygraphy) | 0.87319 | 5.09 | 6283.3 | 108 | 2.21× |
+| trt int8 (polygraphy) | 0.87298 | 2.96 | 10799.4 | 132 | 3.80× |
+| trt fp16 sparse 2:4 | 0.86832 | **4.51** | **7103.0** | 156 | **2.50×** |
+| trt int8 sparse 2:4 | 0.86796 | **2.69** | **11888.2** | 180 | **4.18×** |
+
 
 - **+12% к compute fp16** (`5.09 → 4.51 ms`, `2.21× → 2.50× vs baseline`).
 - **+10% к compute int8** (`2.96 → 2.70 ms`, `3.80× → 4.16× vs baseline`).
@@ -224,12 +239,10 @@ python3 run_bench.py --batch-size 32 --input-size 256 \
 
 ## 8. Визуализация графов через trex
 
-trex рисует граф engine слой-за-слоем. [visualize_engines.py](visualize_engines.py) использует кастомный `sparse_formatter` — раскрашивает узел по precision **плюс** подсвечивает ярко-зелёным conv-слои, в которых TRT реально выбрал sparse Tensor Core ядро (имя тактики содержит `sparse_conv` / `sparse_int8`). Так в одной картинке видно и precision, и где именно сработало 2:4.
+trex рисует граф engine слой-за-слоем. [visualize_engines.py](visualize_engines.py) использует кастомный `sparse_formatter` — раскрашивает узел по precision плюс подсвечивает ярко-зелёным conv-слои, в которых TRT реально выбрал sparse Tensor Core ядро (имя тактики содержит `sparse`). Так в одной картинке видно и precision, и где именно сработало 2:4.
 
 ```bash
-# 1. собрать engines с --profilingVerbosity=detailed (если ещё не собраны выше в разделах 3/4/7)
-
-# 2. экспортировать layer info + per-layer profile для всех 4-х engines
+# экспортировать layer info + per-layer profile для всех 4-х engines
 for tag in dense_fp16 dense_int8 sparse_fp16 sparse_int8; do
     trtexec --loadEngine=experiments/trex_sparse/${tag}.engine \
         --exportLayerInfo=experiments/trex_sparse/${tag}_layers.json \
@@ -237,7 +250,7 @@ for tag in dense_fp16 dense_int8 sparse_fp16 sparse_int8; do
         --shapes=input:32x3x256x256 --iterations=50 --warmUp=200 --noDataTransfers
 done
 
-# 3. рендер PNG
+# рендер PNG
 python visualize_engines.py
 ```
 
@@ -253,8 +266,6 @@ python visualize_engines.py
 - **dense_fp16 / dense_int8** — ни одного ярко-зелёного блока (нет sparse-ядер, тактики из семейства `sm80_xmma_fprop_implicit_gemm_*` и `sm80_xmma_fprop_avdt_dense_int8int8_*`).
 - **sparse_fp16** — **36 из 47** conv-слоёв на sparse ядрах (`sm80_xmma_fprop_sparse_conv_*_sptensor*`). Остальные 11 TRT оставил на dense kernel (в decoder'е и по краям backbone sparse-тактики проигрывают для малых shape'ов).
 - **sparse_int8** — **35 из 47** conv-слоёв на `sm80_xmma_fprop_avdt_sparse_int8int8_*` и `sm80_xmma_fprop_sparse_conv_interleaved_*`.
-
-Плотный ярко-зелёный кластер у sparse-движков приходится на середину графа — глубокий backbone (256/512 каналов), где FLOPs максимум и sparsity даёт наибольший выигрыш.
 
 <details>
 <summary><b>Графы TRT engine (dense fp16 vs int8)</b></summary>
@@ -298,7 +309,7 @@ python visualize_engines.py
 | trt fp16 sparse 2:4 | 0.86832 | **4.51** | **7103.0** | 156 | **2.50×** |
 | trt int8 sparse 2:4 | 0.86796 | **2.69** | **11888.2** | 180 | **4.18×** |
 
-Замечания к таблице:
+
 - Качество **сохранено по всем методам**: разница в `val_iou` между fp16 baseline и int8 — менее `2.5e-4` IoU.
 - TRT-engine быстрее baseline в **2.2× (fp16)** и **3.8× (int8)** — это совпадает с тем, что показывает `trtexec --useCudaGraph` на тех же engine (для fp16 ~4.97 ms).
 - 2:4 semi-structured sparsity поверх fp16/int8 даёт ещё **+11–12%** к compute (NVIDIA Sparse Tensor Cores на A100). Качество просаживается на ~`5e-3` IoU. 
@@ -356,7 +367,8 @@ python run_bench.py --batch-size 32 --input-size 256 \
 
 ## Docker
 
-В образе уже установлено всё: код пайплайна, зависимости (`torch`, `tensorrt`, `polygraphy`, `trex`, `graphviz`) и **готовые артефакты эксперимента** — обученный чекпоинт `trained_baseline.ckpt`, собранные TRT engines `unet_fp16.engine` / `unet_int8.engine`, калибровочный `calib.cache`. После билда можно сразу гонять любой шаг — обучение, валидацию, бенчмарк, демо-инференс — без повторной установки и без необходимости заново тренировать или билдить engine.
+В образе уже установлено всё: код пайплайна, зависимости и веса, движки.
+
 
 Сборка образа:
 
@@ -364,7 +376,7 @@ python run_bench.py --batch-size 32 --input-size 256 \
 docker build -t unet-infer .
 ```
 
-Запуск (интерактивный shell с GPU):
+Запуск:
 
 ```bash
 docker run --rm -it --gpus all unet-infer
@@ -386,8 +398,11 @@ python3 inference_demo.py \
     --ckpt experiments/train_local/lightning_logs/version_0/checkpoints/trained_baseline.ckpt \
     --out /tmp/demo.png
 
-# повторное обучение с нуля (если нужно)
+# повторное обучение с нуля
 python3 train.py --config_path train_config_local.yaml
 ```
 
-Артефакты в `experiments/` (чекпоинт, ONNX, оба `.engine`, `calib.cache`, графы) кладутся в репо отдельным шагом перед `docker build` — образ их подхватывает через `COPY experiments/ ./experiments/`.
+Артефакты в `experiments/` (чекпоинт, ONNX, оба `.engine`, `calib.cache`, графы).
+
+Адрес образа
+TODO
