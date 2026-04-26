@@ -40,10 +40,11 @@ class RealDataCalibrator(trt.IInt8EntropyCalibrator2):
             assert err == cudart.cudaError_t.cudaSuccess, err
         batch = self.batches[self.idx]
         self.idx += 1
-        cudart.cudaMemcpy(
+        err = cudart.cudaMemcpy(
             self.device_input, batch.ctypes.data, self.batch_nbytes,
             cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
         )
+        assert err == cudart.cudaError_t.cudaSuccess, err
         return [int(self.device_input)]
 
     def read_calibration_cache(self):

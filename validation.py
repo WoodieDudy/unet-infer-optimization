@@ -1,7 +1,6 @@
 import argparse
 import yaml
 import json
-import joblib
 import torch
 import lightning as L
 import segmentation_models_pytorch as smp
@@ -30,7 +29,7 @@ def run_evaluation():
             )
             model = model.to(DEVICE, dtype=torch.float16)
             if model_config["compile"]:
-                model = torch.compile(model)
+                model.model = torch.compile(model.model)
         elif model_config["model_path"].endswith(".engine"):
             from quantize import TRTModelWrapper
             trt = TRTModelWrapper(model_config["model_path"])
@@ -55,7 +54,10 @@ def run_evaluation():
         for key, value in results[0].items():
             print(f"{key}: {value:.4f}")
 
-    with open(Path(config["exp_dir"]) / "validation_results.json", "w") as f:
+    exp_dir = Path(config["exp_dir"])
+    exp_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(exp_dir / "validation_results.json", "w") as f:
         f.write(json.dumps(all_results))
 
 

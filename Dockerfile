@@ -1,4 +1,5 @@
-FROM nvcr-proxy.kontur.host/nvidia/tritonserver:26.03-py3
+ARG TRITON_REGISTRY=nvcr.io
+FROM ${TRITON_REGISTRY}/nvidia/tritonserver:26.03-py3
 
 WORKDIR /app
 

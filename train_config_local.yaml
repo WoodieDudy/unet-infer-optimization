@@ -1,4 +1,4 @@
-exp_dir: "/root/projects/unet-infer-optimization/experiments/train_local"
+exp_dir: "experiments/train_local"
 lr: 0.0001
 trainer:
   max_epochs: 10
