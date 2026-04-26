@@ -1,8 +1,8 @@
-exp_dir: "/root/projects/unet-infer-optimization/experiments/validation_local"
+exp_dir: "experiments/validation_local"
 models:
   - model_name: "fp16 baseline"
     compile: false
-    model_path: "/root/projects/unet-infer-optimization/experiments/train_local/lightning_logs/version_0/checkpoints/trained_baseline.ckpt"
+    model_path: "experiments/train_local/lightning_logs/version_0/checkpoints/trained_baseline.ckpt"
     model:
       classes: 3
       in_channels: 3
@@ -11,7 +11,7 @@ models:
 
   - model_name: "torch.compile"
     compile: true
-    model_path: "/root/projects/unet-infer-optimization/experiments/train_local/lightning_logs/version_0/checkpoints/trained_baseline.ckpt"
+    model_path: "experiments/train_local/lightning_logs/version_0/checkpoints/trained_baseline.ckpt"
     model:
       classes: 3
       in_channels: 3
@@ -20,11 +20,11 @@ models:
 
   - model_name: "trt fp16 (polygraphy)"
     compile: false
-    model_path: "/root/projects/unet-infer-optimization/experiments/trt_fp16/unet_fp16.engine"
+    model_path: "experiments/trt_fp16/unet_fp16.engine"
 
   - model_name: "trt int8 (polygraphy)"
     compile: false
-    model_path: "/root/projects/unet-infer-optimization/experiments/trt_fp16/unet_int8.engine"
+    model_path: "experiments/trt_fp16/unet_int8.engine"
 
 data:
   batch_size: 32

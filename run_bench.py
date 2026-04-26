@@ -64,7 +64,11 @@ class TRTComputeRunner:
         logger = trt.Logger(trt.Logger.WARNING)
         with open(engine_path, "rb") as f:
             self._engine = trt.Runtime(logger).deserialize_cuda_engine(f.read())
+        if self._engine is None:
+            raise RuntimeError(f"Failed to deserialize TRT engine from {engine_path}")
         self._context = self._engine.create_execution_context()
+        if self._context is None:
+            raise RuntimeError("Failed to create TRT execution context")
         self._context.set_input_shape(input_name, tuple(input_shape))
 
         out_shape = tuple(self._context.get_tensor_shape(output_name))
@@ -77,8 +81,12 @@ class TRTComputeRunner:
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         self._context.set_tensor_address(self._input_name, x.data_ptr())
-        self._context.execute_async_v3(self._stream)
-        self._cudart.cudaStreamSynchronize(self._stream)
+        ok = self._context.execute_async_v3(self._stream)
+        if not ok:
+            raise RuntimeError("TRT execute_async_v3 failed")
+        err = self._cudart.cudaStreamSynchronize(self._stream)
+        if err != self._cudart.cudaError_t.cudaSuccess:
+            raise RuntimeError(f"cudaStreamSynchronize failed: {err}")
         return self._output
 
     def close(self):
@@ -138,18 +146,22 @@ def main():
 
     # TRT engines (compute-only через сырой TRT API + zero-copy data_ptr())
     trt_runners = []
-    if args.trt_engine:
-        dummy_fp32 = dummy.float().contiguous()  # engine ждёт fp32 input
-    for spec in args.trt_engine:
-        if "=" not in spec:
-            raise SystemExit(f"--trt-engine ожидает NAME=PATH, получено: {spec!r}")
-        name, path = spec.split("=", 1)
-        runner = TRTComputeRunner(path, input_shape)
-        trt_runners.append(runner)
-        r, mem = bench(runner, dummy_fp32, warmup, min_run_time, "UNet inference", name)
-        results.append(r)
-        peak_mems.append(mem)
-        print(r)
+    try:
+        if args.trt_engine:
+            dummy_fp32 = dummy.float().contiguous()  # engine ждёт fp32 input
+        for spec in args.trt_engine:
+            if "=" not in spec:
+                raise SystemExit(f"--trt-engine ожидает NAME=PATH, получено: {spec!r}")
+            name, path = spec.split("=", 1)
+            runner = TRTComputeRunner(path, input_shape)
+            trt_runners.append(runner)
+            r, mem = bench(runner, dummy_fp32, warmup, min_run_time, "UNet inference", name)
+            results.append(r)
+            peak_mems.append(mem)
+            print(r)
+    finally:
+        for runner in trt_runners:
+            runner.close()
 
     compare = torch.utils.benchmark.Compare(results)
     print()
@@ -182,9 +194,6 @@ def main():
     with open("results.json", "w") as f:
         json.dump(output, f, indent=2)
     print("\nResults saved to results.json")
-
-    for runner in trt_runners:
-        runner.close()
 
 
 if __name__ == "__main__":

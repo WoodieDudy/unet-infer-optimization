@@ -28,6 +28,7 @@ class RealDataCalibrator(trt.IInt8EntropyCalibrator2):
         self.idx = 0
         self.device_input = None
         self.batch_nbytes = batches[0].nbytes
+        self._cudart = cudart
 
     def get_batch_size(self):
         return int(self.batches[0].shape[0])
@@ -57,6 +58,11 @@ class RealDataCalibrator(trt.IInt8EntropyCalibrator2):
     def write_calibration_cache(self, cache):
         with open(self.cache_path, "wb") as f:
             f.write(cache)
+
+    def __del__(self):
+        if self.device_input is not None:
+            self._cudart.cudaFree(self.device_input)
+            self.device_input = None
 
 
 def main():
