@@ -1,0 +1,32 @@
+exp_dir: "experiments/validation_local"
+models:
+  - model_name: "fp16 baseline"
+    compile: false
+    model_path: "experiments/train_local/lightning_logs/version_0/checkpoints/trained_baseline.ckpt"
+    model:
+      classes: 3
+      in_channels: 3
+      encoder_weights: "imagenet"
+      encoder_name: "resnet34"
+
+  - model_name: "torch.compile"
+    compile: true
+    model_path: "experiments/train_local/lightning_logs/version_0/checkpoints/trained_baseline.ckpt"
+    model:
+      classes: 3
+      in_channels: 3
+      encoder_weights: "imagenet"
+      encoder_name: "resnet34"
+
+  - model_name: "trt fp16 (polygraphy)"
+    compile: false
+    model_path: "experiments/trt_fp16/unet_fp16.engine"
+
+  - model_name: "trt int8 (polygraphy)"
+    compile: false
+    model_path: "experiments/trt_fp16/unet_int8.engine"
+
+data:
+  batch_size: 32
+  input_size: 256
+  num_workers: 4

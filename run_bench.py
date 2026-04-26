@@ -16,6 +16,13 @@ def parse_args():
     p.add_argument("--input-size", type=int, default=256)
     p.add_argument("--min-run-time", type=float, default=3)
     p.add_argument("--warmup", type=int, default=20)
+    p.add_argument(
+        "--trt-engine",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="TRT engine to bench, format NAME=PATH. Можно указывать несколько раз.",
+    )
     return p.parse_args()
 
 
@@ -42,6 +49,50 @@ def get_env_dict(input_shape):
         "input_shape": list(input_shape),
         "dtype": str(DTYPE),
     }
+
+
+class TRTComputeRunner:
+    """Compute-only TRT обёртка: input/output живут в GPU-памяти, передаём указатели через set_tensor_address."""
+    def __init__(self, engine_path, input_shape, input_name="input", output_name="output", device="cuda"):
+        import tensorrt as trt
+        from cuda.bindings import runtime as cudart
+
+        self._cudart = cudart
+        self._input_name = input_name
+        self._output_name = output_name
+
+        logger = trt.Logger(trt.Logger.WARNING)
+        with open(engine_path, "rb") as f:
+            self._engine = trt.Runtime(logger).deserialize_cuda_engine(f.read())
+        if self._engine is None:
+            raise RuntimeError(f"Failed to deserialize TRT engine from {engine_path}")
+        self._context = self._engine.create_execution_context()
+        if self._context is None:
+            raise RuntimeError("Failed to create TRT execution context")
+        self._context.set_input_shape(input_name, tuple(input_shape))
+
+        out_shape = tuple(self._context.get_tensor_shape(output_name))
+        self._output = torch.empty(out_shape, dtype=torch.float32, device=device)
+        self._context.set_tensor_address(output_name, self._output.data_ptr())
+
+        err, self._stream = cudart.cudaStreamCreate()
+        if err != cudart.cudaError_t.cudaSuccess:
+            raise RuntimeError(f"cudaStreamCreate failed: {err}")
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        self._context.set_tensor_address(self._input_name, x.data_ptr())
+        ok = self._context.execute_async_v3(self._stream)
+        if not ok:
+            raise RuntimeError("TRT execute_async_v3 failed")
+        err = self._cudart.cudaStreamSynchronize(self._stream)
+        if err != self._cudart.cudaError_t.cudaSuccess:
+            raise RuntimeError(f"cudaStreamSynchronize failed: {err}")
+        return self._output
+
+    def close(self):
+        if self._stream is not None:
+            self._cudart.cudaStreamDestroy(self._stream)
+            self._stream = None
 
 
 def bench(fn, dummy, warmup: int, min_run_time: float, label: str, description: str):
@@ -92,6 +143,25 @@ def main():
     results.append(r)
     peak_mems.append(mem)
     print(r)
+
+    # TRT engines (compute-only через сырой TRT API + zero-copy data_ptr())
+    trt_runners = []
+    try:
+        if args.trt_engine:
+            dummy_fp32 = dummy.float().contiguous()  # engine ждёт fp32 input
+        for spec in args.trt_engine:
+            if "=" not in spec:
+                raise SystemExit(f"--trt-engine ожидает NAME=PATH, получено: {spec!r}")
+            name, path = spec.split("=", 1)
+            runner = TRTComputeRunner(path, input_shape)
+            trt_runners.append(runner)
+            r, mem = bench(runner, dummy_fp32, warmup, min_run_time, "UNet inference", name)
+            results.append(r)
+            peak_mems.append(mem)
+            print(r)
+    finally:
+        for runner in trt_runners:
+            runner.close()
 
     compare = torch.utils.benchmark.Compare(results)
     print()
