@@ -59,10 +59,19 @@ class RealDataCalibrator(trt.IInt8EntropyCalibrator2):
         with open(self.cache_path, "wb") as f:
             f.write(cache)
 
-    def __del__(self):
+    def cleanup(self):
         if self.device_input is not None:
             self._cudart.cudaFree(self.device_input)
             self.device_input = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.cleanup()
+
+    def __del__(self):
+        self.cleanup()
 
 
 def main():
@@ -109,7 +118,8 @@ def main():
     config.int8_calibrator = RealDataCalibrator(batches, args.cache, args.input_name)
 
     print("Calibrating (это построит и сразу выбросит engine, нам нужен только cache)…")
-    serialized = builder.build_serialized_network(network, config)
+    with config.int8_calibrator:
+        serialized = builder.build_serialized_network(network, config)
     if serialized is None:
         raise SystemExit("Build/calibration failed")
 
