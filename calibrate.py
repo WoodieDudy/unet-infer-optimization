@@ -41,7 +41,7 @@ class RealDataCalibrator(trt.IInt8EntropyCalibrator2):
             assert err == cudart.cudaError_t.cudaSuccess, err
         batch = self.batches[self.idx]
         self.idx += 1
-        err = cudart.cudaMemcpy(
+        (err,) = cudart.cudaMemcpy(
             self.device_input, batch.ctypes.data, self.batch_nbytes,
             cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
         )

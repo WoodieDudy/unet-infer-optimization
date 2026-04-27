@@ -84,7 +84,7 @@ class TRTComputeRunner:
         ok = self._context.execute_async_v3(self._stream)
         if not ok:
             raise RuntimeError("TRT execute_async_v3 failed")
-        err = self._cudart.cudaStreamSynchronize(self._stream)
+        (err,) = self._cudart.cudaStreamSynchronize(self._stream)
         if err != self._cudart.cudaError_t.cudaSuccess:
             raise RuntimeError(f"cudaStreamSynchronize failed: {err}")
         return self._output
